@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -194,7 +196,7 @@ def test_clean_clojure_keeps_other_language_reports(tmp_path):
 
 
 def test_python_executable_prefers_a_project_venv(tmp_path):
-    binary = tmp_path / ".venv" / "bin" / "python"
+    binary = tmp_path / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     binary.parent.mkdir(parents=True)
     binary.write_text("", encoding="utf-8")
     assert _python_executable(tmp_path) == str(binary)
@@ -502,7 +504,8 @@ def test_an_argument_vector_is_not_a_shell(tmp_path, monkeypatch):
 
 def test_an_argument_vector_cannot_run_a_second_command(tmp_path):
     marker = tmp_path / "pwned"
-    assert run_shell(["true", f"a;touch {marker}"], tmp_path) == 0
+    argument = f"a;touch {marker} & echo bad>{marker}"
+    assert run_shell([sys.executable, "-c", "import sys; assert len(sys.argv) == 2", argument], tmp_path) == 0
     assert not marker.exists()
 
 

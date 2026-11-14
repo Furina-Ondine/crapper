@@ -12,14 +12,27 @@ CRAP = CC² × (1 − coverage)³ + CC
 
 ## Run
 
+Requires Python 3.11 or newer. On Windows, use PowerShell or Command Prompt:
+
+```powershell
+.\crapper.cmd --help
+.\crapper.cmd --no-coverage
+# From another project's directory:
+D:\ub-mode\crapper\crapper.cmd --no-coverage
+```
+
+On Linux and macOS:
+
 ```bash
 ./crapper
 ```
 
-The first run creates `.venv` and installs the tool. From a project root it walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
+The launchers create a local `.venv` and install the tool on first use. Windows uses `py -3`, falling back to `python`; Linux and macOS use `python3`. An interrupted installation is retried on the next launch. Run from the project you want to analyze, or pass `--root`. The tool walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
 
 - a table on stdout, worst score first
 - `.metrics/crap.edn`, replaced on every successful analysis
+
+CLI stdout, stderr, and metric files use UTF-8, including redirected output; no `PYTHONUTF8` setting is needed. Installing the package with `python -m pip install -e /path/to/crapper` also provides the `crapper` command, and `python -m crapper` works on all three operating systems.
 
 ```bash
 ./crapper --no-coverage                  # complexity only; coverage is N/A
@@ -84,10 +97,26 @@ By default a run deletes the previous report for each language it is about to me
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
+Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. `--coverage-command` uses the current platform's shell (`cmd.exe` on Windows), so use that shell's syntax.
+
+Tree-sitter language packs that download parsers fetch each required grammar on first use and then cache it. Bundled language-pack releases are also supported.
+
 ## Development
+
+Windows:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Linux and macOS:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
+
+The GitHub Actions test matrix covers Windows, Linux, and macOS on Python 3.11 and 3.13. The optional EDN reader integration check requires `bb` (Babashka); the legacy `uml` viewer launcher check requires zsh. The viewer launcher itself still targets zsh.
