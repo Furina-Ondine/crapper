@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -104,10 +105,72 @@ def test_coverage_batch_tool_receives_literal_arguments(tmp_path, monkeypatch):
     assert not (tmp_path / "pwned").exists()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher")
-def test_windows_launcher_runs_from_the_project_directory(tmp_path):
-    (tmp_path / "sample.clj").write_text("(ns demo)\n(defn pick [] 1)\n", encoding="utf-8")
-    launcher = Path(__file__).resolve().parents[1] / "crapper.cmd"
-    result = subprocess.run([str(launcher), "--no-coverage"], cwd=tmp_path, capture_output=True)
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 launcher")
+def test_powershell_launcher_runs_from_the_project_directory(tmp_path):
+    project = tmp_path / "中文 空格 🧪 & %PATH% !"
+    project.mkdir()
+    (project / "sample.clj").write_text("(ns demo)\n(defn pick [] 1)\n", encoding="utf-8")
+    launcher = Path(__file__).resolve().parents[1] / "crapper.ps1"
+    result = subprocess.run(
+        ["pwsh", "-NoLogo", "-NoProfile", "-File", str(launcher), "--no-coverage"],
+        cwd=project, capture_output=True,
+    )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / ".metrics" / "crap.edn").is_file()
+    assert (project / ".metrics" / "crap.edn").is_file()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 launcher")
+def test_powershell_launcher_preserves_root_arguments_and_threshold_status(tmp_path):
+    project = tmp_path / "中文 空格 🧪 & %PATH% !"
+    project.mkdir()
+    (project / "sample.clj").write_text("(ns demo)\n(defn pick [] 1)\n", encoding="utf-8")
+    coverage = project / "target" / "coverage"
+    coverage.mkdir(parents=True)
+    (coverage / "lcov.info").write_text("SF:sample.clj\nDA:2,1\nend_of_record\n", encoding="utf-8")
+    launcher = Path(__file__).resolve().parents[1] / "crapper.ps1"
+    result = subprocess.run(
+        ["pwsh", "-NoLogo", "-NoProfile", "-File", str(launcher),
+         "--root", str(project), "--use-existing-coverage", "--threshold", "0"],
+        cwd=tmp_path, capture_output=True,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "CRAP threshold exceeded" in result.stderr.decode("utf-8")
+    assert (project / ".metrics" / "crap.edn").is_file()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 launcher")
+def test_powershell_launcher_preserves_literal_arguments_and_native_exit_status(tmp_path):
+    (tmp_path / "crapper.py").write_text(
+        "import json, os, sys\n"
+        "print(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd()}))\n"
+        "raise SystemExit(37)\n", encoding="utf-8",
+    )
+    arguments = ["", 'quoted"value', "a&b", "%PATH%", "$HOME", "`tick", "bang!name", "中文 🧪", "C:\\trailing\\"]
+    launcher = Path(__file__).resolve().parents[1] / "crapper.ps1"
+    result = subprocess.run(
+        ["pwsh", "-NoLogo", "-NoProfile", "-File", str(launcher), *arguments],
+        cwd=tmp_path, capture_output=True,
+    )
+    assert result.returncode == 37, result.stderr
+    output = json.loads(result.stdout.decode("utf-8"))
+    assert output == {"args": arguments, "cwd": str(tmp_path)}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage commands")
+def test_custom_coverage_command_uses_powershell_syntax_and_quoted_paths(tmp_path):
+    target = tmp_path / "中文 空格 🧪 'quoted'.txt"
+    path = str(target).replace("'", "''")
+    command = f"$message = 'quoted \"value\"'; Set-Content -LiteralPath '{path}' -Value $message -Encoding utf8"
+    assert run_shell(command, tmp_path) == 0
+    assert target.read_text(encoding="utf-8").strip() == 'quoted "value"'
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage commands")
+def test_custom_coverage_command_preserves_native_failure_status(tmp_path):
+    interpreter = sys.executable.replace("'", "''")
+    assert run_shell(f"& '{interpreter}' -c 'raise SystemExit(37)'", tmp_path) == 37
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell coverage commands")
+def test_custom_coverage_command_reports_powershell_errors(tmp_path):
+    assert run_shell("Write-Error 'intentional failure'", tmp_path) == 1

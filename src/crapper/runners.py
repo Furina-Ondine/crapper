@@ -60,18 +60,33 @@ def _run_arguments(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(args, cwd=cwd)
 
 
+def _run_shell_command(command: str, cwd: Path) -> subprocess.CompletedProcess:
+    if os.name == "nt":
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            "$PSNativeCommandUseErrorActionPreference = $false; "
+            "$PSNativeCommandArgumentPassing = 'Standard'; $LASTEXITCODE = 0; & {\n"
+            + command + "\n}; exit $LASTEXITCODE"
+        )
+        return subprocess.run(
+            ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], cwd=cwd,
+        )
+    return subprocess.run(command, cwd=cwd, shell=True)
+
+
 def run_shell(command: str | list[str], cwd: Path) -> int:
     """Run a coverage command.
 
     A list keeps paths and metacharacters in their own arguments. Windows batch
     tools use an explicitly quoted cmd.exe invocation. A string is a command
-    the user typed in `--coverage-command` and runs in the platform's shell.
+    the user typed in `--coverage-command`, run by PowerShell 7 on Windows and
+    the platform's shell on Linux/macOS.
     """
 
     _warn(f"+ ({cwd}) {_show(command)}")
     try:
         if isinstance(command, str):
-            completed = subprocess.run(command, cwd=cwd, shell=True)
+            completed = _run_shell_command(command, cwd)
         else:
             completed = _run_arguments(list(command), cwd)
     except OSError as exc:

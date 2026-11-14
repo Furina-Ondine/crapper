@@ -497,7 +497,12 @@ def test_an_argument_vector_is_not_a_shell(tmp_path, monkeypatch):
     assert run_shell("exit 3", tmp_path) == 0
     marker = tmp_path / "pwned"
     assert run_shell(["true", f"a;touch {marker}"], tmp_path) == 0
-    assert seen[0] == ("exit 3", True)
+    if os.name == "nt":
+        assert seen[0][1] is False
+        assert seen[0][0][0] == "pwsh"
+        assert "exit 3" in seen[0][0][-1]
+    else:
+        assert seen[0] == ("exit 3", True)
     assert seen[1][1] is False
     assert seen[1][0] == ["true", f"a;touch {marker}"]
 

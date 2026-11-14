@@ -12,13 +12,13 @@ CRAP = CC² × (1 − coverage)³ + CC
 
 ## Run
 
-Requires Python 3.11 or newer. On Windows, use PowerShell or Command Prompt:
+Requires Python 3.11 or newer. On Windows, use PowerShell 7.3 or newer (`pwsh`):
 
 ```powershell
-.\crapper.cmd --help
-.\crapper.cmd --no-coverage
+pwsh -NoLogo -NoProfile -File .\crapper.ps1 --help
+pwsh -NoLogo -NoProfile -File .\crapper.ps1 --no-coverage
 # From another project's directory:
-D:\ub-mode\crapper\crapper.cmd --no-coverage
+pwsh -NoLogo -NoProfile -File D:\ub-mode\crapper\crapper.ps1 --no-coverage
 ```
 
 On Linux and macOS:
@@ -27,7 +27,7 @@ On Linux and macOS:
 ./crapper
 ```
 
-The launchers create a local `.venv` and install the tool on first use. Windows uses `py -3`, falling back to `python`; Linux and macOS use `python3`. An interrupted installation is retried on the next launch. Run from the project you want to analyze, or pass `--root`. The tool walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
+The launchers create a local `.venv` and install the tool on first use. Windows uses `py -3`, falling back to `python`; Linux and macOS use `python3`. An interrupted installation is retried on the next launch. The PowerShell launcher preserves argument boundaries and does not change execution policy. Run from the project you want to analyze, or pass `--root`. The tool walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
 
 - a table on stdout, worst score first
 - `.metrics/crap.edn`, replaced on every successful analysis
@@ -97,7 +97,7 @@ By default a run deletes the previous report for each language it is about to me
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
-Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. `--coverage-command` uses the current platform's shell (`cmd.exe` on Windows), so use that shell's syntax.
+Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. On Windows, `--coverage-command` uses PowerShell 7.3+ syntax; Linux/macOS use the platform's shell. For a quoted executable path in PowerShell, use the call operator: `--coverage-command "& 'C:\My Tools\runner.exe' --coverage"`. Native failure exit codes are preserved, and PowerShell errors fail the coverage command.
 
 Tree-sitter language packs that download parsers fetch each required grammar on first use and then cache it. Bundled language-pack releases are also supported.
 
