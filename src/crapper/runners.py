@@ -7,6 +7,8 @@ tool, or a failed run, scores its functions at 0%.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -34,12 +36,36 @@ def _show(command: str | list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def _batch_argument(argument: str) -> str:
+    # Quote every argument for both cmd.exe and the program called by a shim.
+    # Doubled quotes keep shell metacharacters inside a balanced quoted string.
+    escaped = re.sub(r'(\\*)"', lambda match: match[1] * 2 + '""', argument)
+    escaped = re.sub(r'(\\+)$', lambda match: match[1] * 2, escaped)
+    # Expansion is not recursive: the environment variable inserts a literal %.
+    return '"' + escaped.replace("%", "%CRAPPER_LITERAL_PERCENT%") + '"'
+
+
+def _run_arguments(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    if os.name == "nt":
+        args[0] = shutil.which(args[0]) or args[0]
+        if Path(args[0]).suffix.lower() in {".cmd", ".bat"}:
+            shell = os.environ.get("COMSPEC") or str(
+                Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32" / "cmd.exe"
+            )
+            command = " ".join(_batch_argument(argument) for argument in args)
+            return subprocess.run(
+                f'"{shell}" /d /v:off /s /c "{command}"', cwd=cwd,
+                env={**os.environ, "CRAPPER_LITERAL_PERCENT": "%"},
+            )
+    return subprocess.run(args, cwd=cwd)
+
+
 def run_shell(command: str | list[str], cwd: Path) -> int:
     """Run a coverage command.
 
-    A list is an argument vector and does not go through a shell, so a path
-    with spaces or metacharacters stays one argument. A string is a command
-    the user typed in `--coverage-command` and runs in a shell.
+    A list keeps paths and metacharacters in their own arguments. Windows batch
+    tools use an explicitly quoted cmd.exe invocation. A string is a command
+    the user typed in `--coverage-command` and runs in the platform's shell.
     """
 
     _warn(f"+ ({cwd}) {_show(command)}")
@@ -47,7 +73,7 @@ def run_shell(command: str | list[str], cwd: Path) -> int:
         if isinstance(command, str):
             completed = subprocess.run(command, cwd=cwd, shell=True)
         else:
-            completed = subprocess.run(list(command), cwd=cwd)
+            completed = _run_arguments(list(command), cwd)
     except OSError as exc:
         _warn(f"Coverage command failed to start: {exc}")
         return 127
@@ -331,11 +357,12 @@ def python_roots(root: Path, files: list[Path]) -> list[Path]:
 
 
 def _python_executable(package: Path) -> str:
-    for relative in (".venv/bin/python", "venv/bin/python"):
-        candidate = package / relative
+    executable = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    for directory in (".venv", "venv"):
+        candidate = package / directory / executable
         if candidate.is_file():
             return str(candidate)
-    return "python3"
+    return sys.executable
 
 
 def uses_pytest(package: Path) -> bool:

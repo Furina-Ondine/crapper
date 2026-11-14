@@ -6,10 +6,11 @@ from pathlib import Path
 
 @lru_cache(maxsize=None)
 def parser_for(language: str):
-    from tree_sitter_language_pack import download, get_parser
+    import tree_sitter_language_pack as pack
 
-    download([language])
-    return get_parser(language)
+    if hasattr(pack, "download"):
+        pack.download([language])
+    return pack.get_parser(language)
 
 
 def parse(source: str, language: str):
