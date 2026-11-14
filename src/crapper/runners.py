@@ -45,7 +45,14 @@ def _batch_argument(argument: str) -> str:
     return '"' + escaped.replace("%", "%CRAPPER_LITERAL_PERCENT%") + '"'
 
 
+def _coverage_environment() -> dict[str, str]:
+    """Keep Python coverage diagnostics in the CLI's UTF-8 output stream."""
+
+    return {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+
 def _run_arguments(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    environment = _coverage_environment()
     if os.name == "nt":
         args[0] = shutil.which(args[0]) or args[0]
         if Path(args[0]).suffix.lower() in {".cmd", ".bat"}:
@@ -53,14 +60,16 @@ def _run_arguments(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
                 Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32" / "cmd.exe"
             )
             command = " ".join(_batch_argument(argument) for argument in args)
+            environment["CRAPPER_LITERAL_PERCENT"] = "%"
             return subprocess.run(
                 f'"{shell}" /d /v:off /s /c "{command}"', cwd=cwd,
-                env={**os.environ, "CRAPPER_LITERAL_PERCENT": "%"},
+                env=environment,
             )
-    return subprocess.run(args, cwd=cwd)
+    return subprocess.run(args, cwd=cwd, env=environment)
 
 
 def _run_shell_command(command: str, cwd: Path) -> subprocess.CompletedProcess:
+    environment = _coverage_environment()
     if os.name == "nt":
         script = (
             "$ErrorActionPreference = 'Stop'; "
@@ -70,8 +79,9 @@ def _run_shell_command(command: str, cwd: Path) -> subprocess.CompletedProcess:
         )
         return subprocess.run(
             ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], cwd=cwd,
+            env=environment,
         )
-    return subprocess.run(command, cwd=cwd, shell=True)
+    return subprocess.run(command, cwd=cwd, shell=True, env=environment)
 
 
 def run_shell(command: str | list[str], cwd: Path) -> int:
