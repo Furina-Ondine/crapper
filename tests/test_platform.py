@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,51 @@ import pytest
 
 from crapper.languages.treesitter import parser_for
 from crapper.runners import _python_executable, run_shell
+
+
+@pytest.mark.parametrize("command_kind", [
+    "arguments",
+    "shell",
+    pytest.param("batch", marks=pytest.mark.skipif(os.name != "nt", reason="Windows batch coverage command")),
+])
+def test_coverage_subprocess_writes_utf8_under_a_strict_gbk_parent(
+    tmp_path, monkeypatch, capfdbinary, command_kind
+):
+    script = tmp_path / "coverage_child.py"
+    script.write_text(
+        "import os, sys\n"
+        "print('coverage 中文 🧪')\n"
+        "print('diagnostic 中文 🧪', file=sys.stderr)\n"
+        "assert os.environ['PYTHONIOENCODING'] == 'utf-8'\n"
+        "assert os.environ['PYTHONUTF8'] == '1'\n",
+        encoding="utf-8",
+    )
+    command = _coverage_child_command(command_kind, script)
+    monkeypatch.setenv("PYTHONIOENCODING", "gbk:strict")
+    monkeypatch.setenv("PYTHONUTF8", "0")
+    monkeypatch.setenv("CRAPPER_LITERAL_PERCENT", "parent value")
+    original_environment = os.environ.copy()
+
+    status = run_shell(command, tmp_path)
+
+    captured = capfdbinary.readouterr()
+    assert status == 0, captured.err.decode("utf-8", errors="replace")
+    assert captured.out.decode("utf-8").strip() == "coverage 中文 🧪"
+    assert "diagnostic 中文 🧪" in captured.err.decode("utf-8")
+    assert dict(os.environ) == original_environment
+
+
+def _coverage_child_command(kind, script):
+    if kind == "batch":
+        batch = script.with_suffix(".cmd")
+        batch.write_text(f'@"{sys.executable}" "{script}"\n', encoding="utf-8")
+        return [str(batch)]
+    arguments = [sys.executable, str(script)]
+    if kind == "arguments":
+        return arguments
+    if os.name == "nt":
+        return "& " + " ".join("'" + value.replace("'", "''") + "'" for value in arguments)
+    return shlex.join(arguments)
 
 
 def test_help_writes_utf8_when_the_default_output_codec_is_gbk():
