@@ -15,10 +15,10 @@ CRAP = CC² × (1 − coverage)³ + CC
 Requires Python 3.11 or newer. On Windows, use PowerShell 7.3 or newer (`pwsh`):
 
 ```powershell
-pwsh -NoLogo -NoProfile -File .\crapper.ps1 --help
-pwsh -NoLogo -NoProfile -File .\crapper.ps1 --no-coverage
-# From another project's directory:
-pwsh -NoLogo -NoProfile -File D:\ub-mode\crapper\crapper.ps1 --no-coverage
+.\crapper.ps1 --help
+.\crapper.ps1 --no-coverage
+# Analyze another project from the tool checkout:
+.\crapper.ps1 --root ..\my-project --no-coverage
 ```
 
 On Linux and macOS:
@@ -97,7 +97,7 @@ By default a run deletes the previous report for each language it is about to me
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
-Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. On Windows, `--coverage-command` uses PowerShell 7.3+ syntax; Linux/macOS use the platform's shell. For a quoted executable path in PowerShell, use the call operator: `--coverage-command "& 'C:\My Tools\runner.exe' --coverage"`. Native failure exit codes are preserved, and PowerShell errors fail the coverage command.
+Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. On Windows, `--coverage-command` uses PowerShell 7.3+ syntax; Linux/macOS use the platform's shell. For a quoted executable path in PowerShell, use the call operator: `--coverage-command "& '.\my tools\runner.exe' --coverage"`. Native failure exit codes are preserved, and PowerShell errors fail the coverage command.
 
 Tree-sitter language packs that download parsers fetch each required grammar on first use and then cache it. Bundled language-pack releases are also supported.
 
