@@ -16,13 +16,19 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install and test
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           python -m venv .venv
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            PY=.venv/Scripts/python.exe
-          else
-            PY=.venv/bin/python
-          fi
-          "$PY" -m pip install -e ".[dev]"
-          "$PY" -m pytest
+          .venv/bin/python -m pip install -e ".[dev]"
+          .venv/bin/python -m pytest
+      - name: Install and test with PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./.venv/Scripts/python.exe -m pip install -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./.venv/Scripts/python.exe -m pytest
+          exit $LASTEXITCODE
