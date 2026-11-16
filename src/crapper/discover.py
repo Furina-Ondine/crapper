@@ -20,6 +20,7 @@ EXTENSIONS = {
     ".cjs": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".cs": "csharp",
 }
 
 SKIP_DIRS = {
@@ -39,6 +40,12 @@ SKIP_DIRS = {
     ".metrics",
     "testdata",
     "__pycache__",
+    "bin",
+    "obj",
+    "TestResults",
+    ".artifacts",
+    ".vs",
+    "BenchmarkDotNet.Artifacts",
     ".clj-kondo",
 }
 
@@ -71,12 +78,25 @@ def language_of(path: str | Path) -> str | None:
     name = file_path.name
     if name.endswith(".d.ts"):
         return None
+    if name.lower().endswith((".g.cs", ".g.i.cs", ".designer.cs")):
+        return None
     return EXTENSIONS.get(file_path.suffix)
+
+
+def _csharp_test_file(file_path: Path) -> bool:
+    if file_path.suffix != ".cs":
+        return False
+    name = file_path.stem
+    if name.endswith(("Test", "Tests")) or name.lower().endswith(("_test", "_tests")):
+        return True
+    return any(part.lower().endswith((".test", ".tests")) for part in file_path.parts[:-1])
 
 
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
+    if _csharp_test_file(file_path):
+        return True
     if name.endswith(GO_TEST_SUFFIX):
         return True
     if name.endswith(CLOJURE_TEST_SUFFIXES):

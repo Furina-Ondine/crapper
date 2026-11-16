@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and C#. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -65,6 +65,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| C# | `Namespace.Type`, including nested types | method, constructor or operator; `Property.get` / `.set` / `.init` for accessors |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -82,6 +83,43 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+C# (`.cs`, reported as `csharp`) counts methods, constructors, destructors,
+operators, conversions, executable property/indexer/event accessors, and
+expression-bodied properties and indexers. Nested types retain their namespace;
+explicit interface names remain on members. Automatic accessors and abstract
+signatures have no body and are omitted. Local functions and lambdas stay inside
+their enclosing member. Top-level statements form `Program` / `<top-level>`.
+Decisions include `if`, loops, `catch`, `?:`, `&&`, `||`, `??`, `??=`, pattern
+`and` / `or`, non-default switch cases and expression arms, and `when` guards.
+Coverage uses Cobertura branch counts when present, otherwise executable line
+hits, and also accepts LCOV.
+
+C# uses the selected .NET SDK's Roslyn parser through the shared
+`crapper.frontend.parse_document` API, also consumed by Dryer and Mutator.
+The first run builds a small host in the operating system's temporary directory;
+no NuGet parser package or global tool installation is required. Other languages
+retain their existing Tree-sitter parsers. Native syntax kinds and UTF-8 source
+spans are preserved; common roles and executable units connect them to the
+existing analysis algorithms.
+
+For a source file beneath one `.csproj`, the frontend reads `LangVersion` and
+`DefineConstants`, including SDK framework symbols, using MSBuild. CLI analysis
+uses Debug and the first target framework for a multi-targeted project. The
+Python API accepts explicit `configuration`, `target_framework`,
+`language_version` and `symbols`. Loose source uses the selected compiler's
+default language version, no extra symbols and explicit file-based program
+support for `#:` directives. Syntax errors stop analysis with
+a compiler diagnostic; parsing alone does not validate types, overloads or the
+availability of every feature in an older language version.
+
+Default discovery skips .NET `bin`, `obj`, `TestResults`, `.artifacts`, `.vs`,
+and `BenchmarkDotNet.Artifacts` output directories. Generated `.g.cs`, `.g.i.cs`
+and `.Designer.cs` filenames are omitted regardless of case. C# files in
+`*.Test` / `*.Tests` directories (case insensitive), PascalCase `*Test.cs` /
+`*Tests.cs`, and `_test.cs` / `_tests.cs` names follow the normal test exclusion;
+explicit file arguments include tests. Names such as `Contest.cs` and
+`Latest.TestsData` remain production source.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -94,6 +132,29 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| C# | `dotnet test --collect "XPlat Code Coverage"`, or native MTP `--coverage --coverage-output-format cobertura` | `target/coverage/csharp/**/*.cobertura.xml` |
+
+The C# default detects `global.json`'s `test.runner`. VSTest requires the
+project's `coverlet.collector` package; Microsoft.Testing.Platform requires
+`Microsoft.Testing.Extensions.CodeCoverage`. MTP results use a separate module
+directory so concurrently tested projects do not overwrite each other's report.
+The tool does not edit project files or install a collector. A missing collector
+or absent report produces a diagnostic. See the official
+[MTP coverage documentation](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-code-coverage).
+
+An existing [dotnet-coverage](https://learn.microsoft.com/en-us/dotnet/core/additional-tools/dotnet-coverage)
+installation can collect coverage without adding a package to each test project:
+
+```powershell
+.\crapper.ps1 --root ..\my-project --coverage-command 'dotnet-coverage collect -f cobertura -o target/coverage/csharp/coverage.cobertura.xml dotnet test'
+```
+
+`--use-existing-coverage` also finds `*.cobertura.xml` under `coverage` and
+project `TestResults` directories. Reports retain source path ownership when
+several files have the same basename. Multiple classes in one source file and
+multiple reports merge line hits without replacing covered lines with misses;
+branch counts retain the best reported coverage at each line. Invalid XML and
+invalid line records are ignored so other reports remain usable.
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 

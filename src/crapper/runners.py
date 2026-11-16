@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from crapper.discover import is_test_file, language_of
+from crapper.dotnet import coverage_command as dotnet_coverage_command, test_directories
 
 _MAVEN = [
     "mvn",
@@ -121,7 +122,7 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
-_COVERAGE_DIRS = {"typescript", "rust", "go", "python"}
+_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "csharp"}
 
 
 def _outside_language_dirs(coverage: Path, path: Path) -> bool:
@@ -614,6 +615,54 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+def _cover_csharp(root: Path) -> int:
+    report = root / "target" / "coverage" / "csharp"
+    _clean_dir(report)
+    report.mkdir(parents=True)
+    status = 0
+    for index, directory in enumerate(test_directories(root)):
+        output = report / str(index) if directory != root else report
+        code = run_shell(dotnet_coverage_command(directory, output), directory)
+        if code != 0:
+            _warn(f"C# coverage exited {code} in {directory}.")
+            status = code
+    if not list(report.rglob("*.cobertura.xml")):
+        _warn("No C# coverage report. VSTest needs coverlet.collector; MTP needs "
+              "Microsoft.Testing.Extensions.CodeCoverage. Use --coverage-command "
+              "with dotnet-coverage for another collector. C# coverage will score 0%.")
+        return status or 1
+    return status
+
+
+def _run_language_coverage(root: Path, files: list[Path]) -> int:
+    runners = {
+        "clojure": (_cover_clojure, (root,)),
+        "java": (_cover_java, (root, files)),
+        "go": (_cover_go, (root, files)),
+        "typescript": (_cover_typescript, (root, files)),
+        "python": (_cover_python, (root, files)),
+        "rust": (_cover_rust, (root, files)),
+        "csharp": (_cover_csharp, (root,)),
+    }
+    status = 0
+    for language in sorted(_languages_in(files)):
+        runner, arguments = runners[language]
+        status = runner(*arguments) or status
+    return status
+
+
+_REPORT_PATTERNS = {"csharp": ("target/coverage/csharp/**/*.cobertura.xml",)}
+
+
+def generated_reports(root: Path, files: list[Path]) -> dict[str, list[Path]]:
+    """Reports owned by the default providers that declare an output scope."""
+
+    return {
+        language: [path for pattern in _REPORT_PATTERNS[language] for path in root.glob(pattern)]
+        for language in _languages_in(files) if language in _REPORT_PATTERNS
+    }
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -632,17 +681,4 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
             )
         return code
 
-    languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
-    return 0
+    return _run_language_coverage(root, files)

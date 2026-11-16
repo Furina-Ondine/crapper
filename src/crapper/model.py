@@ -17,6 +17,8 @@ class Function:
     # Mutator uses the span to give a nested handler the sites inside it.
     start_byte: int = -1
     end_byte: int = -1
+    # Language readers may supply visibility so consumers need not reparse source.
+    private: bool | None = None
 
 
 @dataclass(frozen=True)

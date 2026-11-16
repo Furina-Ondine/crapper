@@ -21,7 +21,7 @@ from crapper.discover import (
 )
 from crapper.metrics import write_metrics
 from crapper.report import format_report
-from crapper.runners import run_coverage
+from crapper.runners import generated_reports, run_coverage
 
 _SKIPPED_DIRS = ", ".join(sorted(SKIP_DIRS | TEST_DIRS))
 _TEST_PATTERNS = ", ".join(
@@ -44,7 +44,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), C# (.cs).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -76,6 +76,7 @@ Coverage, when it is produced:
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
+  C#           dotnet test: Coverlet on VSTest, native code coverage on MTP
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -84,6 +85,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  C#           namespace.Type, and the member name (Property.get for accessors)
 """
 
 
@@ -286,8 +288,10 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
     if options.use_existing_coverage:
         return load_bundle(root)
     status = run_coverage(root, files, options.coverage_command)
-    if options.coverage_command and status not in (0, None):
+    if status not in (0, None):
         return CoverageBundle()
+    if not options.coverage_command:
+        return load_bundle(root, source_reports=generated_reports(root, files))
     return load_bundle(root)
 
 
@@ -319,9 +323,13 @@ def run(argv: list[str] | None = None) -> int:
         print("No source files to analyze.")
         return 0
 
-    entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    try:
+        entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    except (SyntaxError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     metrics = write_metrics(entries, root)
-    print(format_report(entries), end="", flush=True)
+    print(format_report(entries), end="")
     print(f"Wrote {metrics}", file=sys.stderr)
     return _threshold_status(options, entries)
 

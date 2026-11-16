@@ -8,6 +8,7 @@ its BRDA branch records when it has any, and by line hits otherwise.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from crapper.model import Function
+from crapper.discover import language_of
 from crapper.runners import nearest_marker
 
 _SPAN = re.compile(
@@ -500,6 +502,10 @@ class CoverageBundle:
     def _lcov_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.lcov, path, self.source_parts)
 
+    def line_record_for(self, path: str) -> dict[int, tuple[int, int]] | None:
+        """Find a line report using the bound project source paths."""
+        return self._lcov_lines(path)
+
 
 def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[str, ...]]):
     if not index:
@@ -516,10 +522,15 @@ def _read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _lcov_paths(root: Path) -> list[Path]:
-    paths = list(root.glob("target/coverage/**/lcov.info"))
-    paths.extend(root.glob("coverage/**/lcov.info"))
-    return paths
+_REPORT_PATHS = {
+    "lcov": ("target/coverage/**/lcov.info", "coverage/**/lcov.info"),
+    "cobertura": ("target/coverage/**/*.cobertura.xml", "coverage/**/*.cobertura.xml",
+                   "**/TestResults/**/*.cobertura.xml"),
+}
+
+
+def _report_paths(root: Path, kind: str) -> list[Path]:
+    return [path for pattern in _REPORT_PATHS[kind] for path in root.glob(pattern)]
 
 
 def _merge_texts(paths: list[Path]) -> list[str]:
@@ -538,8 +549,82 @@ def _merge_texts(paths: list[Path]) -> list[str]:
 
 def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     merged: dict[str, dict[int, tuple[int, int]]] = {}
-    for text in _merge_texts(_lcov_paths(root)):
+    for text in _merge_texts(_report_paths(root, "lcov")):
         merged.update(parse_lcov(text))
+    return merged
+
+
+def _merge_count(target, line, counts):
+    target[line] = max(target.get(line, counts), counts)
+
+
+def _cobertura_line(record: FileCoverage, element) -> None:
+    try:
+        line = int(element.get("number", ""))
+        covered = int(int(element.get("hits", "")) > 0)
+    except ValueError:
+        return
+    _merge_count(record, line, (covered, 1))
+    branch = re.search(r"\((\d+)/(\d+)\)", element.get("condition-coverage", ""))
+    if branch:
+        counts = (int(branch[1]), int(branch[2]))
+        _merge_count(record.branches, line, counts)
+
+
+def _cobertura_filename(element, sources: list[str]) -> str:
+    name = normalize_path(element.get("filename", ""))
+    if not name or name.startswith("/") or re.match(r"^[A-Za-z]:", name):
+        return name
+    if len(sources) == 1:
+        return sources[0].rstrip("/") + "/" + name
+    return name
+
+
+def parse_cobertura(text: str) -> dict[str, FileCoverage]:
+    """Read Coverlet and dotnet-coverage reports without counting classes twice."""
+
+    try:
+        document = ET.fromstring(_DOCTYPE.sub("", text))
+    except ET.ParseError:
+        return {}
+    sources = [normalize_path(node.text.strip()) for node in document.findall("./sources/source") if node.text and node.text.strip()]
+    found: dict[str, FileCoverage] = {}
+    for element in document.findall(".//class"):
+        name = _cobertura_filename(element, sources)
+        if not name:
+            continue
+        record = found.setdefault(name, FileCoverage())
+        for line in element.findall("./lines/line"):
+            _cobertura_line(record, line)
+    return found
+
+
+def _merge_line_records(merged, incoming):
+    for name, lines in incoming.items():
+        record = merged.setdefault(name, FileCoverage())
+        for line, counts in lines.items():
+            _merge_count(record, line, counts)
+        for line, counts in lines.branches.items():
+            _merge_count(record.branches, line, counts)
+
+
+def _merge_line_reports(paths: Iterable[Path]) -> dict[str, FileCoverage]:
+    merged: dict[str, FileCoverage] = {}
+    for path in sorted(set(paths)):
+        text = _read(path)
+        if text is None:
+            continue
+        parser = parse_cobertura if path.name.endswith(".cobertura.xml") else parse_lcov
+        _merge_line_records(merged, parser(text))
+    return merged
+
+
+def _line_coverage(root: Path, source_reports) -> dict[str, FileCoverage]:
+    merged = {**_merge_lcov(root), **_merge_line_reports(_report_paths(root, "cobertura"))}
+    for language, paths in (source_reports or {}).items():
+        merged = {name: lines for name, lines in merged.items() if language_of(name) != language}
+        current = _merge_line_reports(paths)
+        merged.update({name: lines for name, lines in current.items() if language_of(name) == language})
     return merged
 
 
@@ -584,11 +669,11 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return found
 
 
-def load_bundle(root: Path) -> CoverageBundle:
+def load_bundle(root: Path, *, source_reports: dict[str, Iterable[Path]] | None = None) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
     return CoverageBundle(
-        lcov=_merge_lcov(root),
+        lcov=_line_coverage(root, source_reports),
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
