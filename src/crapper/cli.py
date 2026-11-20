@@ -15,7 +15,7 @@ from crapper.discover import (
     JS_TEST_SUFFIXES,
     SKIP_DIRS,
     TEST_DIRS,
-    is_test_file,
+    is_production_source,
     iter_source_files,
     language_of,
 )
@@ -44,7 +44,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), C# (.cs).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -237,7 +237,7 @@ def _changed_source(root: Path) -> list[Path]:
     return [
         path
         for path in _changed_files(root)
-        if language_of(path) is not None and not is_test_file(path)
+        if is_production_source(path)
     ]
 
 
@@ -319,7 +319,11 @@ def run(argv: list[str] | None = None) -> int:
         print("No source files to analyze.")
         return 0
 
-    entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    try:
+        entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    except SyntaxError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     metrics = write_metrics(entries, root)
     print(format_report(entries), end="", flush=True)
     print(f"Wrote {metrics}", file=sys.stderr)
