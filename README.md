@@ -85,10 +85,13 @@ Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a compr
 C# scores executable methods, constructors, destructors, operators, property and
 event accessors, and top-level statements. Local functions and lambdas belong to
 their enclosing member. Decisions include control flow, short-circuit operators,
-switch cases and guarded patterns. Tree-sitter analyzes source as written and does
-not evaluate project preprocessor symbols. A parser error reports the file and
-position. The current grammar has gaps, including assignments to ref-returning
-invocations and file-based app directives.
+switch cases and guarded patterns. C# uses the Roslyn parser from the selected
+.NET SDK. For project files, Crapper reads the nearest project's language
+version and preprocessor symbols in Debug configuration, using the first target
+framework for a multi-target project. Loose files use the selected SDK's syntax
+options, including file-based app directives on .NET 10 or later. A syntax error
+reports the file, line, column, and compiler diagnostic. The host builds on first
+use in the system temporary cache.
 
 ## Coverage commands
 

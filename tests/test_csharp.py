@@ -95,7 +95,7 @@ def test_csharp_operators_explicit_members_and_event_accessors():
     ]
 
 
-def test_csharp_syntax_recovery_does_not_publish_misparsed_units():
+def test_csharp_generic_ref_return_assignments_preserve_both_members():
     source = """class C {
     int value;
     ref int At<T>(int index) => ref value;
@@ -105,8 +105,11 @@ def test_csharp_syntax_recovery_does_not_publish_misparsed_units():
     }
     void Neighbor() { }
 }"""
-    with pytest.raises(SyntaxError, match=r"src/Box\.cs:\d+:\d+: .*C#"):
-        read(source)
+    assert [(f.name, f.complexity) for f in read(source)] == [
+        ("At", 1),
+        ("Set", 4),
+        ("Neighbor", 1),
+    ]
 
 
 def test_csharp_executable_units_expose_original_syntax_and_member_visibility():
@@ -129,7 +132,7 @@ interface I { int Default() => 1; }
         assert node.text == data[unit.function.start_byte:unit.function.end_byte]
 
 
-def test_csharp_top_level_counts_both_source_branches_of_a_directive():
+def test_csharp_top_level_counts_the_active_branch_of_a_directive():
     source = """#if FEATURE
 if (ready) Run();
 #else
@@ -138,6 +141,46 @@ void Local(bool ready) { if (ready) Run(); }
 class C { void Other() {} }
 """
     assert [(f.name, f.complexity) for f in read(source)] == [
-        ("<top-level>", 3),
+        ("<top-level>", 2),
         ("Other", 1),
     ]
+
+
+def test_csharp_project_symbols_select_the_active_member_modifier(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOTNET_CLI_HOME", str(tmp_path / "sdk-home"))
+    (tmp_path / "App.csproj").write_text(
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+        '<TargetFramework>net8.0</TargetFramework><DefineConstants>FEATURE</DefineConstants>'
+        '</PropertyGroup></Project>',
+        encoding="utf-8",
+    )
+    source = """class C {
+#if FEATURE && NET8_0
+    public
+#else
+    private
+#endif
+    int F() => 1;
+}
+"""
+    _, units = units_in_source(source, "Box.cs", tmp_path)
+    unit, = units
+    assert unit.function.name == "F"
+    assert unit.private is False
+    assert unit.nodes[0].kind == unit.nodes[0].type == "MethodDeclaration"
+    public = next(node for node in unit.nodes[0].children if node.kind == "PublicKeyword")
+    assert public.parent is unit.nodes[0] and public.text == b"public"
+
+
+def test_csharp_file_directives_use_loose_file_context(tmp_path):
+    source = "#:property TargetFramework=net10.0\nSystem.Console.WriteLine(1);"
+    assert [(f.namespace, f.name) for f in functions_in_file(
+        "csharp", source, "Program.cs", str(tmp_path)
+    )] == [("Program", "<top-level>")]
+    (tmp_path / "App.csproj").write_text(
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>'
+        '</PropertyGroup></Project>',
+        encoding="utf-8",
+    )
+    with pytest.raises(SyntaxError, match=r"Program\.cs:1:\d+: CS9298"):
+        functions_in_file("csharp", source, "Program.cs", str(tmp_path))
