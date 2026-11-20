@@ -1,5 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Barrier
+
 import pytest
 
+from crapper import _roslyn
 from crapper.languages import functions_in_file
 from crapper.languages.csharp import units_in_source
 
@@ -184,3 +189,26 @@ def test_csharp_file_directives_use_loose_file_context(tmp_path):
     )
     with pytest.raises(SyntaxError, match=r"Program\.cs:1:\d+: CS9298"):
         functions_in_file("csharp", source, "Program.cs", str(tmp_path))
+
+
+def test_concurrent_sdk_host_builds_publish_one_complete_parser(tmp_path, monkeypatch):
+    monkeypatch.setattr(_roslyn.tempfile, "gettempdir", lambda: str(tmp_path))
+    sdk = _roslyn._sdk(tmp_path)
+    rename = Path.rename
+    ready = Barrier(2)
+
+    def publish(path, destination):
+        if path.name == "out" and path.is_relative_to(tmp_path):
+            ready.wait(timeout=60)
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", publish)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(_roslyn._host_binary, (sdk, sdk))
+    assert first == second == _roslyn._host_binary(sdk)
+    client = _roslyn._Client(first)
+    try:
+        parsed = client.parse({"path": "Box.cs", "source": "class C { int Size() => 4; }"})
+        assert [unit["name"] for unit in parsed["units"]] == ["Size"]
+    finally:
+        client.close()
