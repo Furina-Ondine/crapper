@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from crapper._roslyn import CSharpHostError
 from crapper.analyze import analyze_files
 from crapper.coverage import CoverageBundle, load_bundle
 from crapper.discover import (
@@ -44,7 +45,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), C# (.cs).
+Rust (.rs), Python (.py), C# (.cs, uses the installed .NET SDK).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -321,7 +322,7 @@ def run(argv: list[str] | None = None) -> int:
 
     try:
         entries = analyze_files(files, root, _coverage_bundle(options, root, files))
-    except SyntaxError as exc:
+    except (SyntaxError, CSharpHostError) as exc:
         print(exc, file=sys.stderr)
         return 1
     metrics = write_metrics(entries, root)
