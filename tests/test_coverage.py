@@ -65,13 +65,15 @@ def test_a_branchless_span_keeps_line_coverage():
     assert bundle.percent_for(scored) == 50.0
 
 
-def test_go_profile_matches_crap4go_statement_ranges():
+def test_go_profile_matches_crap4go_statement_ranges(tmp_path):
     profile = parse_go_profile(
         "mode: set\ngithub.com/acme/demo/board.go:4.1,6.2 2 1\ngithub.com/acme/demo/board.go:8.1,9.2 1 0\n"
     )
     assert go_percent(profile, "board.go", 4, 6) == 100.0
     assert go_percent(profile, "board.go", 8, 9) == 0.0
     assert go_percent(profile, "other.go", 1, 3) is None
+    source = tmp_path / "github.com/acme/demo/board.go"
+    assert go_percent(profile, str(source), 4, 6) == 100.0
 
 
 def test_jacoco_instruction_coverage_joins_on_class_and_method():
