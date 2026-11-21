@@ -65,13 +65,15 @@ def test_a_branchless_span_keeps_line_coverage():
     assert bundle.percent_for(scored) == 50.0
 
 
-def test_go_profile_matches_crap4go_statement_ranges():
+def test_go_profile_matches_crap4go_statement_ranges(tmp_path):
     profile = parse_go_profile(
         "mode: set\ngithub.com/acme/demo/board.go:4.1,6.2 2 1\ngithub.com/acme/demo/board.go:8.1,9.2 1 0\n"
     )
     assert go_percent(profile, "board.go", 4, 6) == 100.0
     assert go_percent(profile, "board.go", 8, 9) == 0.0
     assert go_percent(profile, "other.go", 1, 3) is None
+    source = tmp_path / "github.com/acme/demo/board.go"
+    assert go_percent(profile, str(source), 4, 6) == 100.0
 
 
 def test_jacoco_instruction_coverage_joins_on_class_and_method():
@@ -158,6 +160,83 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+
+
+def test_cobertura_lines_are_available_for_python_with_lcov_precedence(tmp_path):
+    report = tmp_path / "TestResults" / "test-run" / "coverage.cobertura.xml"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        '<coverage><sources><source>D:/checkout/src</source></sources>'
+        '<packages><package><classes><class filename="app.py"><lines>'
+        '<line number="3" hits="4"/><line number="4" hits="0"/>'
+        '</lines></class></classes></package></packages></coverage>',
+        encoding="utf-8",
+    )
+    scored = function(language="python", path="src/app.py", start_line=3, end_line=4)
+    bundle = load_bundle(tmp_path)
+    assert bundle.line_record_for("src/app.py") == {3: (1, 1), 4: (0, 1)}
+    assert bundle.percent_for(scored) == 50.0
+
+    lcov = tmp_path / "coverage" / "lcov.info"
+    lcov.parent.mkdir()
+    lcov.write_text("SF:src/app.py\nDA:3,0\nDA:4,0\nend_of_record\n", encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    assert bundle.line_record_for("src/app.py") == {3: (0, 1), 4: (0, 1)}
+    assert bundle.percent_for(scored) == 0.0
+
+
+def test_absolute_lookup_uses_its_own_relative_key_when_short_paths_overlap(tmp_path):
+    short = tmp_path / "b/app.py"
+    longer = tmp_path / "a/b/app.py"
+    bundle = CoverageBundle(root=tmp_path, lcov={
+        "b/app.py": {3: (0, 1)},
+        "a/b/app.py": {3: (1, 1)},
+    })
+    bundle.bind_sources([str(short), str(longer)])
+    assert bundle.line_record_for(str(short)) == {3: (0, 1)}
+    assert bundle.line_record_for(str(longer)) == {3: (1, 1)}
+
+    del bundle.lcov["b/app.py"]
+    assert bundle.line_record_for(str(short)) is None
+    del bundle.lcov["a/b/app.py"]
+    bundle.lcov["b/app.py"] = {3: (0, 1)}
+    assert bundle.line_record_for(str(longer)) is None
+
+
+def test_line_coverage_exact_paths_keep_the_callers_coordinate_first(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    path = "src/app.py"
+    absolute = str(root / path)
+    bundle = CoverageBundle(root=root, lcov={
+        path: {3: (1, 1)},
+        absolute: {3: (0, 1)},
+        str(work / path): {3: (1, 1)},
+    })
+    bundle.bind_sources([path])
+    assert bundle.line_record_for(path) == {3: (1, 1)}
+    assert bundle.line_record_for(absolute) == {3: (0, 1)}
+
+    del bundle.lcov[path]
+    assert bundle.line_record_for(path) == {3: (0, 1)}
+    del bundle.lcov[absolute]
+    bundle.lcov["app.py"] = {3: (0, 1)}
+    assert bundle.line_record_for(absolute) == {3: (0, 1)}
+
+
+def test_external_absolute_source_keeps_its_own_report_when_a_project_key_shares_its_suffix(tmp_path):
+    root = tmp_path / "project"
+    relative = "src/app.py"
+    external = str(tmp_path / "shared" / relative)
+    bundle = CoverageBundle(root=root, lcov={relative: {3: (0, 1)}})
+    bundle.bind_sources([relative, external])
+
+    assert bundle.line_record_for(external) is None
+    bundle.lcov[external] = {3: (1, 1)}
+    assert bundle.line_record_for(external) == {3: (1, 1)}
+    assert bundle.line_record_for(str(root / relative)) == {3: (0, 1)}
 
 
 def _go_module(module_dir, module_line, profile_text):
