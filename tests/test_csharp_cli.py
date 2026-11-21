@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from crapper.cli import parse_args, run, select_files
 
@@ -32,3 +33,23 @@ def test_cli_scores_csharp_from_existing_lcov_branch_counts(tmp_path):
     assert ':name "Get"' in snapshot
     assert ':coverage 50.0' in snapshot
     assert ':complexity 2' in snapshot
+
+
+def test_cli_reports_csharp_syntax_failure_without_publishing_metrics(tmp_path, capsys):
+    write(tmp_path, "Broken.cs", "class C {\nint F( => 1;\n}")
+    assert run(["--root", str(tmp_path), "--no-coverage"]) == 1
+    assert re.search(r"Broken\.cs:2:\d+: CS\d+", capsys.readouterr().err)
+    assert not (tmp_path / ".metrics/crap.edn").exists()
+
+
+def test_cli_reports_missing_csharp_sdk(tmp_path, capsys, monkeypatch):
+    from crapper import _roslyn
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("dotnet")
+
+    monkeypatch.setattr(_roslyn.subprocess, "run", missing)
+    write(tmp_path, "Sample.cs", "class C { int F() => 1; }")
+    assert run(["--root", str(tmp_path), "--no-coverage"]) == 1
+    assert "C# analysis requires an installed .NET SDK" in capsys.readouterr().err
+    assert not (tmp_path / ".metrics/crap.edn").exists()
