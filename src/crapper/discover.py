@@ -20,6 +20,7 @@ EXTENSIONS = {
     ".cjs": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".cs": "csharp",
 }
 
 SKIP_DIRS = {
@@ -43,6 +44,7 @@ SKIP_DIRS = {
 }
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
+C_SHARP_OUTPUT_DIRS = {"bin", "obj", "testresults", ".artifacts", ".vs", "benchmarkdotnet.artifacts"}
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -71,12 +73,24 @@ def language_of(path: str | Path) -> str | None:
     name = file_path.name
     if name.endswith(".d.ts"):
         return None
+    if name.lower().endswith((".g.cs", ".g.i.cs", ".designer.cs")):
+        return None
     return EXTENSIONS.get(file_path.suffix)
+
+
+def _is_csharp_test(path: Path) -> bool:
+    return (
+        path.stem.endswith(("Test", "Tests"))
+        or path.stem.lower().endswith(("_test", "_tests"))
+        or any(part.lower().endswith((".test", ".tests")) for part in path.parts[:-1])
+    )
 
 
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
+    if file_path.suffix == ".cs" and _is_csharp_test(file_path):
+        return True
     if name.endswith(GO_TEST_SUFFIX):
         return True
     if name.endswith(CLOJURE_TEST_SUFFIXES):
@@ -88,6 +102,16 @@ def is_test_file(path: str | Path) -> bool:
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
         return True
     return any(part in TEST_DIRS for part in file_path.parts)
+
+
+def is_production_source(path: str | Path) -> bool:
+    """Check source conventions for directory walks and changed-file selection."""
+    language = language_of(path)
+    if language is None or is_test_file(path):
+        return False
+    return language != "csharp" or not any(
+        part.lower() in C_SHARP_OUTPUT_DIRS for part in Path(path).parts[:-1]
+    )
 
 
 def _walk(root: Path) -> list[Path]:
@@ -102,7 +126,7 @@ def _walk(root: Path) -> list[Path]:
         ]
         for name in filenames:
             path = Path(dirpath) / name
-            if language_of(path) is None or is_test_file(path):
+            if not is_production_source(path):
                 continue
             found.append(path)
     return found
