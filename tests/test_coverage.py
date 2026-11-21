@@ -183,6 +183,47 @@ def test_cobertura_lines_are_available_for_python_with_lcov_precedence(tmp_path)
     assert bundle.percent_for(scored) == 0.0
 
 
+def test_absolute_lookup_uses_its_own_relative_key_when_short_paths_overlap(tmp_path):
+    short = tmp_path / "b/app.py"
+    longer = tmp_path / "a/b/app.py"
+    bundle = CoverageBundle(root=tmp_path, lcov={
+        "b/app.py": {3: (0, 1)},
+        "a/b/app.py": {3: (1, 1)},
+    })
+    bundle.bind_sources([str(short), str(longer)])
+    assert bundle.line_record_for(str(short)) == {3: (0, 1)}
+    assert bundle.line_record_for(str(longer)) == {3: (1, 1)}
+
+    del bundle.lcov["b/app.py"]
+    assert bundle.line_record_for(str(short)) is None
+    del bundle.lcov["a/b/app.py"]
+    bundle.lcov["b/app.py"] = {3: (0, 1)}
+    assert bundle.line_record_for(str(longer)) is None
+
+
+def test_line_coverage_exact_paths_keep_the_callers_coordinate_first(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    path = "src/app.py"
+    absolute = str(root / path)
+    bundle = CoverageBundle(root=root, lcov={
+        path: {3: (1, 1)},
+        absolute: {3: (0, 1)},
+        str(work / path): {3: (1, 1)},
+    })
+    bundle.bind_sources([path])
+    assert bundle.line_record_for(path) == {3: (1, 1)}
+    assert bundle.line_record_for(absolute) == {3: (0, 1)}
+
+    del bundle.lcov[path]
+    assert bundle.line_record_for(path) == {3: (0, 1)}
+    del bundle.lcov[absolute]
+    bundle.lcov["app.py"] = {3: (0, 1)}
+    assert bundle.line_record_for(absolute) == {3: (0, 1)}
+
+
 def _go_module(module_dir, module_line, profile_text):
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "go.mod").write_text(f"{module_line}\n\ngo 1.21\n", encoding="utf-8")
