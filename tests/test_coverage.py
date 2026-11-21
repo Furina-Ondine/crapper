@@ -160,6 +160,29 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.jacoco is not None
 
 
+def test_cobertura_lines_are_available_for_python_with_lcov_precedence(tmp_path):
+    report = tmp_path / "TestResults" / "test-run" / "coverage.cobertura.xml"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        '<coverage><sources><source>D:/checkout/src</source></sources>'
+        '<packages><package><classes><class filename="app.py"><lines>'
+        '<line number="3" hits="4"/><line number="4" hits="0"/>'
+        '</lines></class></classes></package></packages></coverage>',
+        encoding="utf-8",
+    )
+    scored = function(language="python", path="src/app.py", start_line=3, end_line=4)
+    bundle = load_bundle(tmp_path)
+    assert bundle.line_record_for("src/app.py") == {3: (1, 1), 4: (0, 1)}
+    assert bundle.percent_for(scored) == 50.0
+
+    lcov = tmp_path / "coverage" / "lcov.info"
+    lcov.parent.mkdir()
+    lcov.write_text("SF:src/app.py\nDA:3,0\nDA:4,0\nend_of_record\n", encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    assert bundle.line_record_for("src/app.py") == {3: (0, 1), 4: (0, 1)}
+    assert bundle.percent_for(scored) == 0.0
+
+
 def _go_module(module_dir, module_line, profile_text):
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "go.mod").write_text(f"{module_line}\n\ngo 1.21\n", encoding="utf-8")

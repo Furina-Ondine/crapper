@@ -109,8 +109,10 @@ By default a run deletes the previous report for each language it is about to me
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
-C# reads LCOV reports under `coverage/` or `target/coverage/`. Use
-`--use-existing-coverage` for reports already on disk, or `--coverage-command`
+The line coverage loader reads LCOV under `coverage/` and `target/coverage/`,
+and `*.cobertura.xml` under those directories and `TestResults/`. LCOV takes
+precedence when both formats cover the same file. For C#, use
+`--use-existing-coverage` for reports already on disk or `--coverage-command`
 for your project's collector.
 
 Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. On Windows, `--coverage-command` uses PowerShell 7.3+ syntax; Linux/macOS use the platform's shell. For a quoted executable path in PowerShell, use the call operator: `--coverage-command "& '.\my tools\runner.exe' --coverage"`. Native failure exit codes are preserved, and PowerShell errors fail the coverage command.

@@ -1,4 +1,4 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, Cobertura, JaCoCo, and Go coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. LCOV scores a function by
@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
 
 from crapper.model import Function
@@ -445,6 +445,7 @@ class CoverageBundle:
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
     root: Path | None = None
+    cobertura: dict[str, FileCoverage] = field(default_factory=dict)
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""
@@ -475,7 +476,7 @@ class CoverageBundle:
         html = self._html_lines(function.path)
         if html is not None:
             return percent_for_range(html, function.start_line, function.end_line)
-        record = self._lcov_lines(function.path)
+        record = self.line_record_for(function.path)
         if record is None:
             return None
         branched = branch_percent(record, function.start_line, function.end_line)
@@ -497,8 +498,10 @@ class CoverageBundle:
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
 
-    def _lcov_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
-        return _lookup(self.lcov, path, self.source_parts)
+    def line_record_for(self, path: str) -> dict[int, tuple[int, int]] | None:
+        """Look up a line report, preserving existing LCOV precedence."""
+        record = _lookup(self.lcov, path, self.source_parts)
+        return _lookup(self.cobertura, path, self.source_parts) if record is None else record
 
 
 def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[str, ...]]):
@@ -541,6 +544,55 @@ def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     for text in _merge_texts(_lcov_paths(root)):
         merged.update(parse_lcov(text))
     return merged
+
+
+_COBERTURA_BRANCHES = re.compile(r"\((\d+)/(\d+)\)")
+
+
+def _cobertura_filename(element, sources: list[str]) -> str:
+    name = normalize_path(element.get("filename", ""))
+    if not name or len(sources) != 1:
+        return name
+    if name.startswith("/") or PureWindowsPath(name).is_absolute():
+        return name
+    return f"{sources[0].rstrip('/')}/{name}"
+
+
+def _record_cobertura_line(record: FileCoverage, element) -> None:
+    try:
+        line = int(element.get("number", ""))
+        hit = int(element.get("hits", ""))
+    except ValueError:
+        return
+    record[line] = max(record.get(line, (0, 1)), (int(hit > 0), 1))
+    branch = _COBERTURA_BRANCHES.search(element.get("condition-coverage", ""))
+    if branch:
+        counts = int(branch[1]), int(branch[2])
+        record.branches[line] = max(record.branches.get(line, counts), counts)
+
+
+def _read_cobertura(text: str, found: dict[str, FileCoverage]) -> None:
+    try:
+        document = ET.fromstring(text)
+    except ET.ParseError:
+        return
+    sources = [normalize_path(node.text.strip()) for node in document.findall("./sources/source")
+               if node.text and node.text.strip()]
+    for element in document.findall(".//class"):
+        name = _cobertura_filename(element, sources)
+        if name:
+            record = found.setdefault(name, FileCoverage())
+            for line in element.findall("./lines/line"):
+                _record_cobertura_line(record, line)
+
+
+def _merge_cobertura(root: Path) -> dict[str, FileCoverage]:
+    reports = [report for directory in ("target/coverage", "coverage", "TestResults")
+               for report in (root / directory).rglob("*.cobertura.xml")]
+    found: dict[str, FileCoverage] = {}
+    for text in _merge_texts(reports):
+        _read_cobertura(text, found)
+    return found
 
 
 def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
@@ -593,4 +645,5 @@ def load_bundle(root: Path) -> CoverageBundle:
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
         root=root,
+        cobertura=_merge_cobertura(root),
     )

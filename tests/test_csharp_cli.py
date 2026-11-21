@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 
 from crapper.cli import parse_args, run, select_files
+from crapper.coverage import load_bundle
 
 
 def write(root: Path, path: str, text: str) -> Path:
@@ -40,6 +41,26 @@ def test_cli_reports_csharp_syntax_failure_without_publishing_metrics(tmp_path, 
     assert run(["--root", str(tmp_path), "--no-coverage"]) == 1
     assert re.search(r"Broken\.cs:2:\d+: CS\d+", capsys.readouterr().err)
     assert not (tmp_path / ".metrics/crap.edn").exists()
+
+
+def test_cli_scores_csharp_from_existing_cobertura_branch_counts(tmp_path):
+    write(tmp_path, "src/Widget.cs", "class Widget {\n int Get(bool ok) => ok ? 1 : 0;\n}\n")
+    write(tmp_path, "coverage/unit.cobertura.xml", """
+        <coverage><packages><package><classes>
+        <class filename="src/Widget.cs"><lines>
+          <line number="2" hits="1" branch="true" condition-coverage="50% (1/2)" />
+          <line number="3" hits="0" />
+        </lines></class>
+        <class filename="src/Widget.cs"><lines><line number="2" hits="0"/></lines></class>
+        </classes></package></packages></coverage>
+    """)
+
+    assert load_bundle(tmp_path).line_record_for("src/Widget.cs") == {2: (1, 1), 3: (0, 1)}
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    snapshot = (tmp_path / ".metrics/crap.edn").read_text(encoding="utf-8")
+    assert ':name "Get"' in snapshot
+    assert ':coverage 50.0' in snapshot
+    assert ':complexity 2' in snapshot
 
 
 def test_cli_reports_missing_csharp_sdk(tmp_path, capsys, monkeypatch):
