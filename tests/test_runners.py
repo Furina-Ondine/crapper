@@ -484,6 +484,8 @@ def test_python_coverage_module_missing_is_reported(tmp_path, monkeypatch, capsy
 
 def test_an_argument_vector_is_not_a_shell(tmp_path, monkeypatch):
     seen = []
+    executable = tmp_path / "true.exe"
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: str(executable) if name == "true" else None)
 
     def fake(command, cwd, shell=False, env=None):
         seen.append((command, shell))
@@ -504,7 +506,8 @@ def test_an_argument_vector_is_not_a_shell(tmp_path, monkeypatch):
     else:
         assert seen[0] == ("exit 3", True)
     assert seen[1][1] is False
-    assert seen[1][0] == ["true", f"a;touch {marker}"]
+    expected = str(executable) if os.name == "nt" else "true"
+    assert seen[1][0] == [expected, f"a;touch {marker}"]
 
 
 def test_an_argument_vector_cannot_run_a_second_command(tmp_path):
