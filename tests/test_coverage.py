@@ -224,6 +224,19 @@ def test_line_coverage_exact_paths_keep_the_callers_coordinate_first(tmp_path, m
     assert bundle.line_record_for(absolute) == {3: (0, 1)}
 
 
+def test_external_absolute_source_keeps_its_own_report_when_a_project_key_shares_its_suffix(tmp_path):
+    root = tmp_path / "project"
+    relative = "src/app.py"
+    external = str(tmp_path / "shared" / relative)
+    bundle = CoverageBundle(root=root, lcov={relative: {3: (0, 1)}})
+    bundle.bind_sources([relative, external])
+
+    assert bundle.line_record_for(external) is None
+    bundle.lcov[external] = {3: (1, 1)}
+    assert bundle.line_record_for(external) == {3: (1, 1)}
+    assert bundle.line_record_for(str(root / relative)) == {3: (0, 1)}
+
+
 def _go_module(module_dir, module_line, profile_text):
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "go.mod").write_text(f"{module_line}\n\ngo 1.21\n", encoding="utf-8")
