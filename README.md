@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and C#. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -65,6 +65,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| C# | `Namespace.Type`, or `Program` | the executable member name |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -82,6 +83,14 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+C# scores executable methods, constructors, destructors, operators, property and
+event accessors, and top-level statements. Local functions and lambdas belong to
+their enclosing member. Decisions include control flow, short-circuit operators,
+switch cases and guarded patterns. Tree-sitter analyzes source as written and does
+not evaluate project preprocessor symbols. A parser error reports the file and
+position. The current grammar has gaps, including assignments to ref-returning
+invocations and file-based app directives.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -96,6 +105,10 @@ By default a run deletes the previous report for each language it is about to me
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
+
+C# reads LCOV reports under `coverage/` or `target/coverage/`. Use
+`--use-existing-coverage` for reports already on disk, or `--coverage-command`
+for your project's collector.
 
 Coverage requires the project's language toolchain on `PATH`. Windows command shims such as `npm.cmd` and `mvn.cmd` are resolved automatically. Python coverage prefers the project's `.venv` or `venv` interpreter (`Scripts/python.exe` on Windows, `bin/python` on Linux/macOS), falling back to the interpreter running crapper. On Windows, `--coverage-command` uses PowerShell 7.3+ syntax; Linux/macOS use the platform's shell. For a quoted executable path in PowerShell, use the call operator: `--coverage-command "& '.\my tools\runner.exe' --coverage"`. Native failure exit codes are preserved, and PowerShell errors fail the coverage command.
 
